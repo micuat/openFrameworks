@@ -311,28 +311,6 @@ void ofxKinect::update() {
 		return;
 	}
 
-	if(bNeedsUpdateVideo){
-		bIsFrameNewVideo = true;
-		bGotData = true;
-		tryCount = 0;
-		if(this->lock()) {
-            if( videoPixels.getHeight() == videoPixelsIntra.getHeight() ){
-                swap(videoPixels,videoPixelsIntra);
-            }else{
-                int minimumSize = MIN(videoPixels.size(), videoPixelsIntra.size());
-                memcpy(videoPixels.getPixels(), videoPixelsIntra.getPixels(), minimumSize);
-            }
-			bNeedsUpdateVideo = false;
-			this->unlock();
-		}
-
-		if(bUseTexture) {
-			videoTex.loadData(videoPixels.getPixels(), width, height, bIsVideoInfrared?GL_LUMINANCE:GL_RGB);
-		}
-	} else {
-		bIsFrameNewVideo = false;
-	}
-
 	if(bNeedsUpdateDepth){
 		bIsFrameNewDepth = true;
 		bGotData = true;
@@ -352,6 +330,70 @@ void ofxKinect::update() {
 		bIsFrameNewDepth = false;
 	}
 
+	if(bNeedsUpdateVideo){
+		bIsFrameNewVideo = true;
+		bGotData = true;
+		tryCount = 0;
+		if(this->lock()) {
+			//
+			if( bIsVideoInfrared ) {
+				memset(videoPixels.getPixels(), 0, 640*480);
+#define REG_X_VAL_SCALE 256 // "fixed-point" precision for double -> int32_t conversion
+				
+#define S2D_PIXEL_CONST 10
+#define S2D_CONST_OFFSET 0.375
+				
+#define DEPTH_SENSOR_X_RES 1280
+#define DEPTH_MIRROR_X 0
+				
+#define DEPTH_MAX_METRIC_VALUE FREENECT_DEPTH_MM_MAX_VALUE
+#define DEPTH_NO_MM_VALUE      FREENECT_DEPTH_MM_NO_VALUE
+#define DEPTH_MAX_RAW_VALUE    FREENECT_DEPTH_RAW_MAX_VALUE
+#define DEPTH_NO_RAW_VALUE     FREENECT_DEPTH_RAW_NO_VALUE
+				
+#define DEPTH_X_OFFSET 1
+#define DEPTH_Y_OFFSET 1
+#define DEPTH_X_RES 640
+#define DEPTH_Y_RES 480
+				freenect_registration* reg = &(kinectDevice->registration);
+				uint32_t target_offset = DEPTH_Y_RES * reg->reg_pad_info.start_lines;
+				for( int y = 0; y < 480; y++ ) {
+					for( int x = 0; x < 640; x++ ) {
+						uint16_t metric_depth = depthPixelsRaw[x + y * DEPTH_X_RES];//kinect.getPixels()[x + y * DEPTH_X_RES];
+						uint32_t reg_index = DEPTH_MIRROR_X ? ((y + 1) * DEPTH_X_RES - x - 1) : (y * DEPTH_X_RES + x);
+						uint32_t nx = (reg->registration_table[reg_index][0] + reg->depth_to_rgb_shift[metric_depth]) / REG_X_VAL_SCALE;
+						uint32_t ny =  reg->registration_table[reg_index][1];
+						
+						// ignore anything outside the image bounds
+						if (nx >= DEPTH_X_RES) continue;
+						
+						// convert nx, ny to an index in the depth image array
+						uint32_t target_index = (DEPTH_MIRROR_X ? ((ny + 1) * DEPTH_X_RES - nx - 1) : (ny * DEPTH_X_RES + nx)) - target_offset;
+						
+						videoPixels.getPixels()[target_index] = videoPixelsIntra.getPixels()[x + y * DEPTH_X_RES];
+					}
+				}
+			} else {
+				if( videoPixels.getHeight() == videoPixelsIntra.getHeight() ){
+					swap(videoPixels,videoPixelsIntra);
+				}else{
+					int minimumSize = MIN(videoPixels.size(), videoPixelsIntra.size());
+					memcpy(videoPixels.getPixels(), videoPixelsIntra.getPixels(), minimumSize);
+				}
+			}
+			
+			bNeedsUpdateVideo = false;
+			this->unlock();
+		}
+		
+		if(bUseTexture) {
+			videoTex.loadData(videoPixels.getPixels(), width, height, bIsVideoInfrared?GL_LUMINANCE:GL_RGB);
+		}
+		
+	} else {
+		bIsFrameNewVideo = false;
+	}
+	
 }
 
 //------------------------------------
